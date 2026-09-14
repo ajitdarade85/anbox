@@ -1,0 +1,43 @@
+name: Run integration tests
+on: push
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup Anbox Cloud
+      # For best security replace "main" with the latest git revision of the
+      # repository from https://github.com/canonical/anbox-cloud-github-action
+      uses: canonical/anbox-cloud-github-action@main
+      with:
+        channel: latest/stable
+        ubuntu-pro-token: ${{ secrets.UBUNTU_PRO_TOKEN }}
+    - name: Create Android instance
+      id: create-instance
+      env:
+        ANDROID_VERSION: 15
+        # If you want Android running in a VM instead of a system container
+        USE_VM: false
+      run: |
+        arch=amd64
+        if [ "$(uname -m)" = aarch64 ]; then
+          arch=arm64
+        fi
+
+        args=()
+        if [ "$USE_VM" = true ]; then
+          args+=(--vm)
+        fi
+
+        image=jammy:android"$ANDROID_VERSION":"$arch"
+        id="$(amc launch -r -s adb "${args[@]}" --name android0 "$image")"
+        amc wait -c status=running "$id"
+        echo "id=$id" >> "$GITHUB_OUTPUT"
+    - name: Access Android over ADB
+      run: |
+        sudo apt install -y adb
+        id=${{ steps.create-instance.outputs.id }}
+        addr="$(amc show "$id" --format=json | jq -r .network.address)"
+        adb connect "$addr":5559
+    - name: Run tests
+      run: |
+        test "$(adb shell getprop ro.product.model)" = Anbox
